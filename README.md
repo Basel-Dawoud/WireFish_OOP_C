@@ -1,4 +1,4 @@
-WireFish - Packet Sniffer
+# WireFish - Packet Sniffer
 
 **WireFish** is a simple packet sniffer tool written in C that uses the `libpcap` library to capture and analyze network packets. This tool can parse and display information about network packets, including IP, TCP, UDP, ICMP, HTTP, HTTPS, and SSH.
 
