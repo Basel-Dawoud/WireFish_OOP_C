@@ -3,30 +3,34 @@
 #include "sniffer.h"
 
 int main(int argc, char *argv[]) {
-    if (argc < 4) {
-        fprintf(stderr, "Usage: %s <filter_ip> <filter_port> <device>\n", argv[0]);
+    // Check if there are enough arguments passed
+    if (argc < 2) {
+        printf("Usage: %s <filter_ip> [filter_port]\n", argv[0]);
         return 1;
     }
 
-    // Initialize sniffer with IP, port, and device
-    sniffer* sniff = wirefish_create(argv[1], argv[2], atoi(argv[3]));
+    // Declare a pointer to WireFish
+    WireFish *sniffer = malloc(sizeof(WireFish)); // Allocate memory for WireFish
 
-    // Check if sniffer creation failed
-    if (sniff == NULL) {
-        fprintf(stderr, "Error: Failed to create sniffer object.\n");
+    if (sniffer == NULL) { // Always check if memory allocation is successful
+        fprintf(stderr, "Memory allocation failed\n");
         return 1;
     }
 
-    // Output the filtering IP and Port
-    printf("Filtering IP: %s Port: %d\n",
-           wirefish_get_filter_ip(sniff),
-           wirefish_get_filter_port(sniff));
+    // Initialize sniffer with the provided arguments
+    sniffer_init(sniffer, argv[1], argv[1], (argc >= 3) ? atoi(argv[2]) : 0);
+    
+    // Start sniffer
+    sniffer_start(sniffer);
+    
+    // Stop sniffer
+    sniffer_stop(sniffer);
+    
+    // Clean up sniffer
+    sniffer_cleanup(sniffer);
 
-    // Start packet capturing
-    wirefish_start(sniff);
-
-    // Clean up and destroy sniffer object
-    wirefish_destroy(sniff);
+    // Free allocated memory
+    free(sniffer);
 
     return 0;
 }
