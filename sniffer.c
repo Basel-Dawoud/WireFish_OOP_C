@@ -4,9 +4,6 @@
 #include <arpa/inet.h>
 #include <pcap/pcap.h>
 #include <string.h>
-#include <netinet/ip.h>
-#include <netinet/tcp.h>
-#include <netinet/udp.h>
 
 // Sniffer structure definition
 typedef struct _sniffer {
@@ -18,91 +15,118 @@ typedef struct _sniffer {
     int filter_port;
 } sniffer;
 
-// Global protocol handlers (singletons)
-static HTTPHandler http_handler = {
-    .base.digest = http_digest,
-    .port = 80,
-    .protocol_name = "HTTP"
-};
-
-static FTPHandler ftp_handler = {
-    .base.digest = ftp_digest,
-    .port = 21,
-    .protocol_name = "FTP"
-};
-
-static DNSHandler dns_handler = {
-    .base.digest = dns_digest,
-    .port = 53,
-    .protocol_name = "DNS"
-};
-
-
-
-// Function Definitions
-
 const char* wirefish_get_filter_ip(const sniffer* s) {
     return s->filter_ip;
-}
+  }
 
-int wirefish_get_filter_port(const sniffer* s) {
-    return s->filter_port;
-}
+// Protocol Structure: Base structure for all protocols (HTTP, DNS, FTP)
+typedef struct Payload {    
+    char *protocol;
+    int portNum;
 
-void wirefish_start(sniffer *s) {
+    // Function pointer for handling protocol-specific data
+    void (*digest_packet)(const u_char *packet);
+} Payload;
+
+// Derived structures for HTTP, DNS, and FTP protocols
+typedef struct HTTP {
+    Payload payload;  // HTTP protocol data (inherits Payload)
+} HTTP;
+
+typedef struct DNS {
+    Payload payload;  // DNS protocol data (inherits Payload)
+} DNS;
+
+typedef struct FTP {
+    Payload payload;  // FTP protocol data (inherits Payload)
+} FTP;
+
+
+// Initializes the sniffer with device and filter criteria (IP/port)
+void sniffer_init(sniffer *s, char *device, const char *filter_ip, int filter_port) {
+    pcap_if_t *alldevsp;  // Declare as pcap_if_t *
+
+    s->filter_ip = filter_ip ? strdup(filter_ip) : NULL;
+    s->filter_port = filter_port;
+
+    if (!device){
+        if (pcap_findalldevs(&alldevsp, s->errbuf) == -1) {
+            fprintf(stderr, "Error finding devices: %s\n", s->errbuf);
+            exit(1);
+        }
+    
+        if (alldevsp == NULL || alldevsp->name == NULL) {
+            fprintf(stderr, "No devices found.\n");
+            exit(1);
+        }
+        
+        if(alldevsp->name != NULL)
+        {
+            s->devices[0] = alldevsp->name;
+        }
+        
+        if(alldevsp->next->name != NULL)
+        {
+            s->devices[1] = alldevsp->next->name;
+        }
+        
+        if(alldevsp->next->next->name != NULL)
+        {
+            s->devices[2] = alldevsp->next->next->name;                
+        }
+
+        pcap_freealldevs(alldevsp);  // Free the entire list of devices
+    
+
+    } else {
+        s->devices[0] = device;
+        s->devices[1] = NULL;
+        s->devices[2] = NULL;
+    }
+
+
+    // Open devices for packet capture
     for (int i = 0; i < 3; i++) {
-        if (s->devices[i] && s->handle[i]) {
-            pcap_loop(s->handle[i], 0, packet_handler, (u_char *)s);
+        if (s->devices[i] != NULL) {
+            s->handle[i] = pcap_open_live(s->devices[i], BUFSIZ, 1, 1000, s->errbuf);
+            if (s->handle[i] == NULL) {
+                printf("Error opening device %s: %s\n", s->devices[i], s->errbuf);
+            }
         }
     }
-    printf("Sniffing started...\n");
-}
 
-void wirefish_stop(sniffer *s) {
-    for (int i = 0; i < 3; i++) {
-        if (s->devices[i] && s->handle[i]) {
-            pcap_breakloop(s->handle[i]);
+    // Apply filter if filter_ip or filter_port is specified
+    if (filter_ip || filter_port) {
+        char filter_exp[100];
+        if (filter_ip && filter_port) {
+            snprintf(filter_exp, sizeof(filter_exp), "host %s and port %d", filter_ip, filter_port);
+        } else if (filter_ip) {
+            snprintf(filter_exp, sizeof(filter_exp), "host %s", filter_ip);
+        } else if (filter_port) {
+            snprintf(filter_exp, sizeof(filter_exp), "port %d", filter_port);
+        }
+
+        struct bpf_program fp;
+        for (int i = 0; i < 3; i++) {
+            if (s->handle[i] != NULL) {
+                if (pcap_compile(s->handle[i], &fp, filter_exp, 0, PCAP_NETMASK_UNKNOWN) == -1) {
+                    printf("Error compiling filter: %s\n", pcap_geterr(s->handle[i]));
+                }
+                if (pcap_setfilter(s->handle[i], &fp) == -1) {
+                    printf("Error setting filter: %s\n", pcap_geterr(s->handle[i]));
+                }
+            }
         }
     }
-    printf("Sniffing stopped...\n");
 }
 
-sniffer* wirefish_create(const char* filter_ip, const char* filter_port, int device) {
-    sniffer* new_sniffer = malloc(sizeof(sniffer));
-    if (new_sniffer == NULL) {
-        fprintf(stderr, "Error: Memory allocation failed for sniffer.\n");
-        return NULL;
-    }
-
-    // Initialize fields of new_sniffer, for example:
-    new_sniffer->filter_ip = strdup(filter_ip);
-    new_sniffer->filter_port = atoi(filter_port);
-    // Initialize any other necessary fields
-
-    return new_sniffer;
-}
-
-
-void wirefish_destroy(sniffer *s) {
-    for (int i = 0; i < 3; i++) {
-        if (s->handle[i]) {
-            pcap_close(s->handle[i]);
-        }
-        if (s->devices[i]) {
-            free(s->devices[i]);
-        }
-    }
-    if (s->filter_ip) {
-        free((void *)s->filter_ip);
-    }
-    printf("Sniffer cleaned up...\n");
-}
-
-// Main packet handler function
+// Handles each captured packet
 void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
+    // Skip Ethernet header (14 bytes) and point to the IP header
     struct iphdr *ip = (struct iphdr *)(packet + 14);  // Skip Ethernet header
-    int ip_header_len = ip->ihl * 4;
+    int ip_header_len = ip->ihl * 4;  // IP header length
 
+    // Ensure the packet is large enough to hold an IP header
     if (pkthdr->len < 14 + ip_header_len) {
         printf("Packet is too small to contain an IP header.\n");
         return;
@@ -121,69 +145,136 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
     printf("   |-Source IP         : %s\n", inet_ntoa(*(struct in_addr *)&ip->saddr));
     printf("   |-Destination IP    : %s\n", inet_ntoa(*(struct in_addr *)&ip->daddr));
 
-    ProtocolHandler *handler = NULL;
-    const u_char *payload = NULL;
-    int payload_length = 0;
-
+    // Check if the IP header is large enough to hold the protocol-specific header
     if (ip->protocol == IPPROTO_TCP) {
-        struct tcphdr *tcp = (struct tcphdr *)(packet + 14 + ip_header_len);
-        int tcp_header_len = tcp->doff * 4;
-        if (pkthdr->len < (14 + ip_header_len + tcp_header_len)) {
-            printf("Packet is too small to contain a TCP header.\n");
-            return;
-        }
-        payload = packet + 14 + ip_header_len + tcp_header_len;
-        payload_length = pkthdr->len - (14 + ip_header_len + tcp_header_len);
+        struct tcphdr *tcp = (struct tcphdr *)(packet + 14 + ip_header_len); // Skip IP header
+        printf("TCP Header:\n");
+        printf("   |-Source Port      : %u\n", ntohs(tcp->source));
+        printf("   |-Destination Port : %u\n", ntohs(tcp->dest));
+        printf("   |-Sequence Number  : %u\n", ntohl(tcp->seq));
+        printf("   |-Acknowledgment   : %u\n", ntohl(tcp->ack_seq));
+        printf("   |-Header Length    : %d DWORDS or %d Bytes\n", (unsigned int)tcp->doff, (unsigned int)tcp->doff * 4);
 
-        switch(ntohs(tcp->dest)) {
-            case 80: handler = (ProtocolHandler*)&http_handler; break;
-            case 21: handler = (ProtocolHandler*)&ftp_handler; break;
-        }
-    } else if (ip->protocol == IPPROTO_UDP) {
-        struct udphdr *udp = (struct udphdr *)(packet + 14 + ip_header_len);
-        if (pkthdr->len < (14 + ip_header_len + sizeof(struct udphdr))) {
-            printf("Packet is too small to contain a UDP header.\n");
-            return;
-        }
-        payload = packet + 14 + ip_header_len + sizeof(struct udphdr);
-        payload_length = pkthdr->len - (14 + ip_header_len + sizeof(struct udphdr));
+        // Now process the payload of the TCP packet
+        const u_char *payload = packet + 14 + ip_header_len + tcp->doff * 4; // Skip IP + TCP headers
+        int payload_length = pkthdr->len - (14 + ip_header_len + tcp->doff * 4); // Calculate remaining length
 
-        if(ntohs(udp->dest) == 53) {
-            handler = (ProtocolHandler*)&dns_handler;
+        if (ntohs(tcp->dest) == 80) {
+            // Digest HTTP packets if the destination port is 80 (HTTP)
+            digest_http_packet(payload, payload_length);
+        } else if (ntohs(tcp->dest) == 21) {
+            // Digest FTP packets if the destination port is 21 (FTP)
+            digest_ftp_packet(payload, payload_length);
         }
-    }
+    } 
+    else if (ip->protocol == IPPROTO_UDP) {
+        struct udphdr *udp = (struct udphdr *)(packet + 14 + ip_header_len); // Skip IP header
+        printf("UDP Header:\n");
+        printf("   |-Source Port      : %u\n", ntohs(udp->source));
+        printf("   |-Destination Port : %u\n", ntohs(udp->dest));
+        printf("   |-Length           : %u\n", ntohs(udp->len));
+        printf("   |-Checksum         : %u\n", ntohs(udp->check));
 
-    if(handler && payload_length > 0) {
-        handler->digest(handler, payload, payload_length);
+        // Now process the payload of the UDP packet
+        const u_char *payload = packet + 14 + ip_header_len + sizeof(struct udphdr); // Skip IP + UDP headers
+        int payload_length = pkthdr->len - (14 + ip_header_len + sizeof(struct udphdr)); // Calculate remaining length
+
+        if (ntohs(udp->dest) == 53) {
+            // Digest DNS packets if the destination port is 53 (DNS)
+            digest_dns_packet(payload, payload_length);
+        }
+    } 
+    else if (ip->protocol == IPPROTO_ICMP) {
+        struct icmphdr *icmp = (struct icmphdr *)(packet + 14 + ip_header_len); // Skip IP header
+        printf("ICMP Header:\n");
+        printf("   |-Type      : %d\n", icmp->type);
+        printf("   |-Code      : %d\n", icmp->code);
+        printf("   |-Checksum  : %d\n", icmp->checksum);
+    } 
+    else {
+        printf("Unknown Protocol\n");
     }
 }
 
-void http_digest(ProtocolHandler *self, const u_char *payload, int length) {
-    HTTPHandler *http = (HTTPHandler*)self;
-    printf("[%s/%d] Digesting packet (%d bytes):\n", http->protocol_name, http->port, length);
-    for(int i = 0; i < 100 && i < length; i++) {
-        if(payload[i] == '\0') break;
+
+// Starts the sniffing process
+void sniffer_start(sniffer *s) {
+    for (int i = 0; i < 3; i++) {
+        if (s->devices[i] && s->handle[i]) {
+            pcap_loop(s->handle[i], 0, packet_handler, (u_char *)s);
+        }
+    }
+    printf("Sniffing started...\n");
+}
+
+// Stops sniffing on all devices
+void sniffer_stop(sniffer *s) {
+    for (int i = 0; i < 3; i++) {
+        if (s->devices[i] && s->handle[i]) {
+            pcap_breakloop(s->handle[i]);
+        }
+    }
+    printf("Sniffing stopped...\n");
+}
+
+// Cleans up sniffer resources
+void sniffer_cleanup(sniffer *s) {
+    for (int i = 0; i < 3; i++) {
+        if (s->handle[i]) {
+            pcap_close(s->handle[i]);
+        }
+        if (s->devices[i]) {
+            free(s->devices[i]);  // Free device names
+        }
+    }
+    if (s->filter_ip) {
+        free((void *)s->filter_ip);  // Free filter IP
+    }
+    printf("Sniffer cleaned up...\n");
+}
+
+// Digest HTTP packets (based on the payload)
+void digest_http_packet(const u_char *payload, int payload_length) {
+    printf("Digesting HTTP Packet (first 100 bytes):\n");
+    for (int i = 0; i < 100 && i < payload_length; i++) {
+        if (payload[i] == '\0') break; // Stop at null byte (end of string)
         printf("%c", payload[i]);
     }
     printf("\n");
+
+    // Simple check for HTTP method or response code
+    if (payload[0] == 'G' && payload[1] == 'E' && payload[2] == 'T') {
+        printf("Detected HTTP GET request\n");
+    }
 }
 
-void ftp_digest(ProtocolHandler *self, const u_char *payload, int length) {
-    FTPHandler *ftp = (FTPHandler*)self;
-    printf("[%s/%d] Digesting packet (%d bytes):\n", ftp->protocol_name, ftp->port, length);
-    for(int i = 0; i < 100 && i < length; i++) {
-        if(payload[i] == '\0') break;
+// Digest FTP packets (based on the payload)
+void digest_ftp_packet(const u_char *payload, int payload_length) {
+    printf("Digesting FTP Packet (first 100 bytes):\n");
+    for (int i = 0; i < 100 && i < payload_length; i++) {
+        if (payload[i] == '\0') break; // Stop at null byte (end of string)
         printf("%c", payload[i]);
     }
     printf("\n");
+
+    // Look for FTP commands (like USER)
+    if (payload[0] == 'U' && payload[1] == 'S' && payload[2] == 'E' && payload[3] == 'R') {
+        printf("Detected FTP USER command\n");
+    }
 }
 
-void dns_digest(ProtocolHandler *self, const u_char *payload, int length) {
-    DNSHandler *dns = (DNSHandler*)self;
-    printf("[%s/%d] Digesting packet (%d bytes):\n", dns->protocol_name, dns->port, length);
-    for(int i = 0; i < 100 && i < length; i++) {
-        if(payload[i] == '\0') break;
-        printf("%02x ", payload[i]);
+// Digest DNS packets (based on the payload)
+void digest_dns_packet(const u_char *payload, int payload_length) {
+    printf("Digesting DNS Packet (first 100 bytes):\n");
+    for (int i = 0; i < 100 && i < payload_length; i++) {
+        if (payload[i] == '\0') break; // Stop at null byte (end of string)
+        printf("%c", payload[i]);
     }
     printf("\n");
+
+    // Look for DNS query types (e.g., A record)
+    if (payload[0] == 0x00 && payload[1] == 0x01) {
+        printf("Detected DNS A record query\n");
+    }
 }
+
