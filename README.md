@@ -1,149 +1,155 @@
-# WireFish - Packet Sniffer
+# WireFish - A Packet Sniffer in C with OOP Structure
 
-**WireFish** is a simple packet sniffer tool written in C that uses the `libpcap` library to capture and analyze network packets. This tool can parse and display information about network packets, including IP, TCP, UDP, ICMP, HTTP, HTTPS, and SSH.
+**WireFish** is a packet sniffer written in C that captures and analyzes network packets similar to Wireshark. The project uses Object-Oriented Programming (OOP) principles to provide a clean, modular, and extendable structure. WireFish supports filtering packets based on IP address and port, and it can handle multiple protocols like HTTP, FTP, and DNS.
 
-It provides support for filtering packets based on IP addresses and port numbers, offering a user-friendly command-line interface to monitor and inspect network traffic.
+---
 
 ## Features
 
-- **Capture and analyze packets** on a specified network interface.
-- Display information about **IP packets** (source/destination IP addresses, etc.).
-- Analyze **TCP**, **UDP**, and **ICMP** protocol layers.
-- Support for **application layer protocols** like **HTTP**, **HTTPS**, and **SSH**.
-- **Packet filtering** based on IP addresses and ports.
-- Written in C with **object-oriented programming (OOP)** concepts using structures and function pointers.
+- Captures network packets from available network devices.
+- Filters packets by IP address and port number.
+- Supports packet analysis for protocols like HTTP, FTP, and DNS.
+- Implements OOP principles using C structs and function pointers for cleaner and more maintainable code.
 
-## Requirements
+---
 
-To compile and run **WireFish**, you'll need:
+## Key OOP Concepts in WireFish
 
-- **Linux** operating system.
-- **libpcap** library (for packet capturing).
-- **gcc** or any other C compiler.
+### 1. **Encapsulation**
+Encapsulation refers to the concept of bundling the data and the methods that operate on that data into a single unit (i.e., a class or struct). In WireFish, this is achieved using the `WireFish` struct and the `ProtocolHandler` struct.
 
-### Installing libpcap (if not already installed)
+- The `WireFish` struct encapsulates everything related to packet sniffing: the devices to capture packets from, the filter settings (IP address and port), and the pcap handle for packet capturing.
+- The `ProtocolHandler` struct holds function pointers for handling protocol-specific tasks. This encapsulates how each protocol (HTTP, FTP, DNS) should handle its own data.
 
-For **Debian/Ubuntu** or other **APT-based systems**:
+### 2. **Inheritance**
+In C, inheritance is mimicked using structures. The `Payload` struct acts as the base structure, and the specific protocol structs like `HTTP`, `FTP`, and `DNS` inherit from `Payload`.
 
-```bash
-sudo apt-get install libpcap-dev
-```
+- The `Payload` structure defines shared properties and methods for handling the packet payload.
+- Derived structs (`HTTP`, `FTP`, `DNS`) add their own specific methods for processing data, which makes it easy to extend the application with additional protocol handlers.
 
-For **RedHat/CentOS/Fedora** or **YUM-based systems**:
+### 3. **Polymorphism**
+Polymorphism allows different types of objects to respond to the same method in different ways. In WireFish, this is achieved through function pointers.
 
-```bash
-sudo yum install libpcap-devel
-```
+- The `Payload` structure contains a function pointer `digest_packet`, which is defined differently in each protocol handler (`HTTP`, `FTP`, `DNS`).
+- When a packet is captured, the appropriate handler (based on the protocol) calls its own `digest_packet` function to process the packet.
 
-## Installation
+### 4. **Abstraction**
+Abstraction hides complex implementation details and provides a simple interface. In WireFish, the user interacts with simple functions like `wirefish_create`, `wirefish_start`, and `wirefish_stop` to manage packet sniffing, without needing to know how packets are captured or decoded internally.
 
-1. Clone this repository to your local machine:
+- Functions like `wirefish_create` and `wirefish_start` abstract away the complexity of setting up and starting the packet capture process.
+- Users don’t need to understand the internal details of how packets are filtered or how protocols are decoded.
 
-```bash
-git clone https://github.com/yourusername/wirefish.git
-cd wirefish
-```
-
-2. Compile the project using `make`:
-
-```bash
-make
-```
-
-This will generate an executable file called `wirefish`.
-
-## Usage
-
-To start capturing packets on a network interface, run the following command:
-
-```bash
-sudo ./wirefish -i <interface>
-```
-
-Where `<interface>` is the name of the network interface you want to capture packets on (e.g., `eth0`, `wlp3s0`, `enp2s0`).
-
-### Example:
-
-```bash
-sudo ./wirefish -i wlp3s0
-```
-
-This command starts capturing packets on the `wlp3s0` interface.
-
-### Filtering Packets
-
-You can apply filters to capture specific packets. The filter expressions are based on **BPF (Berkeley Packet Filter)** syntax. 
-
-To filter for HTTP traffic (port 80), use:
-
-```bash
-sudo ./wirefish -i wlp3s0 "tcp port 80"
-```
-
-Other common filter examples:
-
-- **Capture all traffic from a specific IP address**:
-
-```bash
-sudo ./wirefish -i wlp3s0 "host 192.168.1.1"
-```
-
-- **Capture traffic from a specific IP and port**:
-
-```bash
-sudo ./wirefish -i wlp3s0 "host 192.168.1.1 and tcp port 443"
-```
-
-If no filter is specified, all packets on the interface will be captured.
+---
 
 ## Code Structure
 
-### Key Files
+### 1. **WireFish Structure**
+The `WireFish` structure holds all the details for packet sniffing, including the device names, pcap handles, filter criteria (IP and port), and error buffer.
 
-- **`main.c`**: The entry point of the program that sets up the sniffer and starts the packet capture loop.
-- **`sniffer.c`**: Contains the logic for packet capture, parsing, and filtering.
-- **`sniffer.h`**: Header file with the `PacketSniffer_t` structure definition and function declarations.
-- **`makefile`**: The build configuration file used to compile the project.
-- **`README.md`**: This file, which provides the documentation for the project.
+```c
+typedef struct _sniffer {
+    char *devices[3];
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle[3];
+    struct pcap_pkthdr pkthdr;
+    const char *filter_ip;
+    int filter_port;
+} sniffer;
+```
 
-### OOP Concepts in C
+- `devices[3]`: Holds the names of the network devices available for sniffing.
+- `handle[3]`: Holds the pcap handles for capturing packets from the devices.
+- `filter_ip` and `filter_port`: Used to filter the packets based on IP address and port.
 
-The program uses **object-oriented programming (OOP)** principles in C through the use of structures and function pointers to simulate objects and methods. Here's how it works:
+### 2. **Protocol Handlers**
+Each protocol (HTTP, FTP, DNS) is represented by a structure that contains specific handling logic. For example, the `HTTP` structure is derived from the `Payload` base structure.
 
-- **PacketSniffer_t structure**: Represents a packet sniffer object with data and methods associated with it.
-- **Methods**: Functions are associated with the structure to allow the sniffer to initialize, start capturing, set filters, and parse protocols.
+```c
+typedef struct HTTP {
+    Payload payload;  // HTTP protocol data (inherits Payload)
+} HTTP;
+```
 
-### Parsing Protocols
+Each of these structures has a function to handle specific packets. For example, the `digest_http_packet` function handles HTTP packets.
 
-The program parses the following protocols:
+```c
+void digest_http_packet(const u_char *payload, int payload_length) {
+    // Process the HTTP packet and extract useful information
+}
+```
 
-- **IP Layer**: Captures and displays source and destination IP addresses.
-- **TCP Layer**: Displays TCP header information (e.g., source/destination ports).
-- **UDP Layer**: Displays UDP header information (e.g., source/destination ports).
-- **ICMP Layer**: Displays ICMP packet type and code.
-- **Application Layer**:
-  - **HTTP**: Basic parsing of HTTP packets.
-  - **HTTPS**: Displays encrypted data (decryption is not currently supported).
-  - **SSH**: Displays encrypted SSH packets (decryption is not currently supported).
+### 3. **Sniffer Initialization**
+The sniffer is initialized with the network device name and optional filter parameters (IP and port). The `sniffer_init` function sets up the pcap handles and applies the filter.
 
-## Troubleshooting
+```c
+void sniffer_init(sniffer *s, char *device, const char *filter_ip, int filter_port) {
+    // Open the network device and apply filter if necessary
+}
+```
 
-### Segmentation Faults or Crashes
+### 4. **Packet Handling**
+The `packet_handler` function processes each captured packet, checks the protocol type (TCP, UDP, ICMP), and calls the appropriate function to handle the data. It then passes the packet data to the correct protocol handler (HTTP, FTP, DNS).
 
-- Ensure the network interface is active and connected.
-- Ensure you're using `sudo` to run the program, as capturing packets typically requires root privileges.
+```c
+void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
+    // Process the packet based on its protocol (TCP/UDP/ICMP)
+}
+```
 
-### Filter Errors
+### 5. **Starting and Stopping the Sniffer**
+The `sniffer_start` function begins the packet capture on all devices, and `sniffer_stop` stops the capture.
 
-- If you encounter a filter parsing error, verify that the filter expression is correctly formatted according to the [BPF filter syntax](https://www.tcpdump.org/manpages/pcap-filter.7.html).
+```c
+void sniffer_start(sniffer *s) {
+    // Start sniffing on the available devices
+}
 
-### No Packets Captured
+void sniffer_stop(sniffer *s) {
+    // Stop sniffing on all devices
+}
+```
 
-- Ensure there is network traffic on the selected interface.
-- Test without any filter (e.g., `sudo ./wirefish -i wlp3s0 ""`) to check if packets are being captured.
+### 6. **Cleaning Up**
+After sniffing, the `sniffer_cleanup` function ensures that all resources (such as memory and pcap handles) are properly released.
 
-### Contact
+```c
+void sniffer_cleanup(sniffer *s) {
+    // Clean up memory and pcap handles
+}
+```
 
-For any questions or feedback, please feel free to reach out via GitHub issues or contact me at:
+---
 
-- **Email**: Baseldawoud2003@gmail.com
+## How It Works
+
+1. **Initialize Sniffer**: You provide a filter IP and an optional port to the program when running it. This configures which packets to capture.
+   
+2. **Start Sniffer**: Once initialized, the sniffer starts capturing packets from the network devices using pcap. The program processes each packet, printing information about the packet's protocol (IP, TCP/UDP header) and content (HTTP, FTP, DNS).
+   
+3. **Filter Packets**: You can filter the packets by IP address and port. If no filter is provided, it captures all packets.
+   
+4. **Handle Protocols**: Based on the protocol type (TCP, UDP, ICMP), the sniffer will call the corresponding function to process the payload. For example, HTTP packets are handled by the `digest_http_packet` function.
+
+5. **Stop and Cleanup**: After sniffing, you can stop the sniffer and clean up the resources.
+
+---
+
+## Example Usage
+
+```bash
+sudo ./wirefish wlp3s0 80
+```
+
+This command will start sniffing on the network device `wlp3s0` and filter packets that are coming to or from port `80` (HTTP). The `sudo` is required since packet capturing usually needs root privileges.
+
+--- 
+
+## Conclusion
+
+WireFish is a simple yet powerful packet sniffer that uses Object-Oriented Programming principles in C to manage network packet sniffing in a modular and extendable way. By leveraging encapsulation, inheritance, polymorphism, and abstraction, it allows for easy extension (e.g., adding more protocol handlers) and better code organization. Whether you are monitoring your network traffic or learning more about network protocols, WireFish provides a clear and efficient way to capture and analyze network packets.
+
+## Contact
+
+For any questions or inquiries, feel free to reach out via email:
+
+**Email**: [baselinux2024@gmail.com]
